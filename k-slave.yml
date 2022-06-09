@@ -1,18 +1,16 @@
 ---
-- name: "Install k8s worker node"
+- name: "Installing k8s worker node"
   hosts: all
   vars_files: 
     - vars/slave-variables
     - vars/host_values
   tasks:
-#Update packages and install needed
     - name: "k8s worker node ready with kubernetes repo"
       copy:
         src: templates/kubernetes.repo
         dest: /etc/yum.repos.d/kubernetes.repo
 
-#Get ready with necessary packages
-    - name: "Install yum-utils and chrony"
+    - name: "Installing yum-utils and chrony"
       yum:
         name:
           - yum-utils
@@ -20,37 +18,36 @@
         state: latest
         update_cache: True
 
-#Timedatctl sync
-    - name: Set timezone to Asia/Kolkata
+    - name: "Setting timezone to Asia/Kolkata"
       timezone:
         name: Asia/Kolkata
 
-    - name: ntp sync.
+    - name: "Sync ntp enabling.
       shell:
         cmd: 'timedatectl set-ntp true'
 
-    - name: restart chrony
+    - name: "restarting chrony"
       systemd:
         name: chronyd
         state: restarted
         enabled: yes
 
-    - name: "k8s worker node add repos to docker"
+    - name: "Adding repos for docker"
       shell:
         cmd: 'yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo'
 
-    - name: rp_filter
+    - name: "rp_filter enabling"
       shell:
         cmd: 'echo 1 > /proc/sys/net/ipv4/conf/all/rp_filter'
 
 
-    - name: "k8s worker node update all packages"
+    - name: "Updating all packages"
       yum:
         name: "*"
         state: present
         update_cache: true
         
-    - name: " {{ item.name }} install packages"
+    - name: " {{ item.name }} installing"
       yum:
         name: "{{ item.name }}"
         state: latest
@@ -59,8 +56,7 @@
       when: item.required == True
       loop: "{{ packages }}"
 
-#Start and enable docker and kubelet
-    - name: "k8s worker node start and enable keep alive and ha proxy"
+    - name: "Starting and enabling docker and kubelet"
       systemd:
         name: docker
         state: restarted
@@ -71,14 +67,14 @@
         state: restarted
         enabled: yes
 
-    - name: "k8s worker node replace line"
+    - name: "Replacing driver to systemd"
       lineinfile:
         path: /usr/lib/systemd/system/docker.service
         regexp: '^(.*)ExecStart=(.*)$'
         line: 'ExecStart=/usr/bin/dockerd -H fd:// --containerd=/run/containerd/containerd.sock --exec-opt native.cgroupdriver=systemd'
         backrefs: yes
 
-    - name: "k8s worker node create environment"
+    - name: "Worker-node creating environment"
       file:
         path: /etc/systemd/system/kubelet.service.d/
         owner: root
@@ -86,28 +82,16 @@
         state: directory
         mode: '0755'
 
-    - name: " k8s worker node memory and accounting"
+    - name: "Configuring memory and accounting"
       shell:
         cmd: 'echo -e "[Service]\nCPUAccounting=true\nMemoryAccounting=true" > /etc/systemd/system/kubelet.service.d/11-cgroups.conf'
-
-
-
-#NTP update
-    - name: "k8s worker node NTP Date to crone"
-      cron:
-        name: "Time Update"
-        minute: "*"
-        job: "ntpdate time.apple.com"
-
-#Disable SE Linux
-    - name: "k8s worker node disable SELinux"
+        
+    - name: "Disabling SELinux"
       selinux:
         state: disabled
       register: sestatus
 
-
-#Add hosts file contents
-    - name: "k8s worker node create copy the content"
+    - name: "local hosts file settingup"
       template: 
         src: templates/remote_hosts.tmpl 
         dest: /etc/hosts
@@ -116,21 +100,18 @@
         group: root
         backup: yes
 
-# Add firewall rules
-    - name: "k8s worker node implement rules"
+    - name: "Implementing firewall rules"
       firewalld:
         port: "{{item.port}}/{{item.proto}}"
         permanent: yes
         state: enabled
       loop: "{{ m_ports }}"
 
-#Do a reboot
-    - name: "k8s worker node reboot"
+    - name: "Rebooting machine"
       reboot:
       when: sestatus.changed == true
 
-#Wait for the server to boot back
-    - name: "k8s worker node Wait for server to restart"
+    - name: "Waiting for server to restart"
       local_action:
         module: wait_for
           host={{ inventory_hostname }}
@@ -139,12 +120,7 @@
           timeout=60
       when: sestatus.changed == true
 
-#Clean old kernels
-    - name: "k8s worker node cleanup old kernels"
-      command: 'package-cleanup --oldkernels --count=1'
-
-# Enable modprob br_netfilter and forward rules
-    - name: "k8s worker node modprob br_netfilter and forward rules"
+    - name: "Setting up modprob br_netfilter and forward rules"
       shell:
         cmd: 'modprobe br_netfilter'
     - shell:
@@ -152,8 +128,7 @@
     - shell:
         cmd: "echo '1' > /proc/sys/net/ipv4/ip_forward"
 
-#Start and enable docker and kubelet
-    - name: "k8s worker node Start and enable keep alive and ha proxy"
+    - name: "Restarting docker and kubelet"
       systemd:
         name: docker
         state: restarted
@@ -164,24 +139,24 @@
         state: restarted
         enabled: yes
 
-    - name: "k8s worker node delete Containerd toml"
+    - name: "Deleting Containerd toml"
       file:
         path: /etc/containerd/config.toml
         state: absent
 
-    - name: "k8s worker node restart the containerd"
+    - name: "Restarting the containerd"
       systemd:
         name: containerd
         state: restarted
         enabled: yes
 
-    - name: "k8s worker node deploy the slave connection stringy"
+    - name: "Deploying connection string for worker node"
       command: 'sh slave_string.sh'
 
-    - name: "k8s worker node ip table rule1"
+    - name: "ip table rule1"
       shell:
         cmd: 'iptables -D  INPUT -j REJECT --reject-with icmp-host-prohibited'
 
-    - name: "k8s worker node ip table rule2"
+    - name: "ip table rule2"
       shell:
         cmd: 'iptables -D  FORWARD -j REJECT --reject-with icmp-host-prohibited'
