@@ -21,8 +21,8 @@
         state: latest
         update_cache: True
 
-#Timedatctl sync
-    - name: Set timezone to Asia/Kolkata
+#Timedatctl sync, very important for all nodes
+    - name: "Set timezone to Asia/Kolkata"
       timezone:
         name: Asia/Kolkata
 
