@@ -69,7 +69,7 @@
       when: item.required == True
       loop: "{{ packages }}"
 
-    - name: "Starting and enabling keepalived and ha-proxy"
+    - name: "Restarting docker and kubelet"
       systemd:
         name: docker
         state: restarted
