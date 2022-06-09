@@ -283,16 +283,6 @@
     - name: "Metallb env setup - apply the config map"
       command: kubectl apply -f metallb_conf.yaml
 
-    - name: "Metallb env setup - Metallb config_map"
-      template:
-        src: templates/pv.yaml
-        dest: /root
-        mode: 644
-
-    - name: "Metallb env setup - apply the config map"
-      command: kubectl apply -f pv.yaml
-
-
     - systemd:
         name: keepalived
         state: restarted
