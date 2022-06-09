@@ -11,11 +11,29 @@
         src: templates/kubernetes.repo
         dest: /etc/yum.repos.d/kubernetes.repo
 
-    - name: "k8s worker node install yum-utils"
+#Get ready with necessary packages
+    - name: "Install yum-utils and chrony"
       yum:
-        name: yum-utils
+        name:
+          - yum-utils
+          - chrony
         state: latest
         update_cache: True
+
+#Timedatctl sync
+    - name: Set timezone to Asia/Kolkata
+      timezone:
+        name: Asia/Kolkata
+
+    - name: ntp sync.
+      shell:
+        cmd: 'timedatectl set-ntp true'
+
+    - name: restart chrony
+      systemd:
+        name: chronyd
+        state: restarted
+        enabled: yes
 
     - name: "k8s worker node add repos to docker"
       shell:
