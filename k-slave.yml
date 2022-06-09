@@ -1,4 +1,14 @@
 ---
+- name: "Copying needed files to the slave machine"
+  hosts: all
+  become: true
+  tasks:
+    - name: "Joining string to the local machine, in case adding in a later point"
+      copy:
+        src: slave_string
+        dest: ~/slave_string.sh
+        mode: 755
+        
 - name: "Installing k8s worker node"
   hosts: all
   vars_files: 
