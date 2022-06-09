@@ -1,0 +1,25 @@
+#VIP
+vip: 192.168.29.30
+vip_hostname: k8s-vip
+
+##Hostnames and IPS
+master1_hostname: k8s-master-1
+master1_ip: 192.168.29.31
+master2_hostname: k8s-master-2
+master2_ip: 192.168.29.32
+master3_hostname: k8s-master-3
+master3_ip: 192.168.29.33
+
+##Nodes and IPs
+node1_name: k8s-node-1
+node1_ip: 192.168.29.34
+node2_name: k8s-node-2
+node2_ip: 192.168.29.35
+node3_name: k8s-node-3
+node3_ip: 192.168.29.36
+node4_name: k8s-node-4
+node4_ip: 192.168.29.37
+node5_name: k8s-node-5
+node5_ip: 192.168.29.38
+node6_name: k8s-node-6
+node6_ip: 192.168.29.39

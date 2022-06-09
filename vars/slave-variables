@@ -1,0 +1,38 @@
+host_name: "k8s-node-1"
+int_face: ens192
+packages:
+  - name: bash-completion
+    required: yes
+  - name: mlocate
+    required: yes
+  - name: wget
+    required: yes
+  - name: net-tools
+    required: yes
+  - name: telnet
+    required: yes
+  - name: ntpdate
+    required: yes
+  - name: docker-ce
+    required: yes
+  - name: kubeadm
+    required: yes
+
+
+m_ports:
+  - port: 6783
+    proto: tcp
+  - port: 10250
+    proto: tcp
+  - port: 10255
+    proto: tcp
+  - port: 30000-32767
+    proto: tcp
+  - port: 179
+    proto: tcp
+  - port: 4789
+    proto: udp
+  - port: 7946
+    proto: tcp
+  - port: 7946
+    proto: udp 

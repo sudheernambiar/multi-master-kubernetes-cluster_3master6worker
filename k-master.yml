@@ -1,0 +1,253 @@
+---
+- name: "copy fines to destination"
+  hosts: all
+  become: true
+  tasks:
+    - name: copy files to dest
+      copy:
+        src: master_string
+        dest: ~/master_string.sh
+        mode: 755
+
+- name: "Install k8s master"
+  hosts: all
+  vars_files:
+    - vars/mast-variables
+    - vars/host_values
+  tasks:
+
+#Get ready with necessary packages
+    - name: "Install yum-utils and chrony"
+      yum:
+        name:
+          - yum-utils
+          - chrony
+        state: latest
+        update_cache: True
+
+#Timedatctl sync
+    - name: Set timezone to Asia/Kolkata
+      timezone:
+        name: Asia/Kolkata
+
+    - name: ntp sync.
+      shell:
+        cmd: 'timedatectl set-ntp true'
+
+    - name: restart chrony
+      systemd:
+        name: chronyd
+        state: restarted
+        enabled: yes
+
+#Update packages and install needed
+    - name: "Ready with kubernetes repo"
+      copy:
+        src: templates/kubernetes.repo
+        dest: /etc/yum.repos.d/kubernetes.repo
+
+    - name: rp_filter
+      shell:
+        cmd: 'echo 1 > /proc/sys/net/ipv4/conf/all/rp_filter'
+
+    - name: add repos to docker
+      shell:
+        cmd: 'yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo'
+
+    - name: "Change Hostname"
+      hostname:
+        name: "{{ host_name }}"
+
+    - name: "Update all packages"
+      yum:
+        name: "*"
+        state: present
+        update_cache: true
+
+    - name: " {{ item.name }} install packages"
+      yum:
+        name: "{{ item.name }}"
+        state: latest
+        update_cache: True
+
+      when: item.required == True
+      loop: "{{ packages }}"
+
+
+#Start and enable docker and kubelet
+    - name: "Start and enable keep alive and ha proxy"
+      systemd:
+        name: docker
+        state: restarted
+        enabled: yes
+
+    - systemd:
+        name: kubelet
+        state: restarted
+        enabled: yes
+
+    - name: replace line
+      lineinfile:
+        path: /usr/lib/systemd/system/docker.service
+        regexp: '^(.*)ExecStart=(.*)$'
+        line: 'ExecStart=/usr/bin/dockerd -H fd:// --containerd=/run/containerd/containerd.sock --exec-opt native.cgroupdriver=systemd'
+        backrefs: yes
+
+    - name: "Create environment"
+      file:
+        path: /etc/systemd/system/kubelet.service.d/
+        owner: root
+        group: root
+        state: directory
+        mode: '0755'
+
+    - name: memory and accounting
+      shell:
+        cmd: 'echo -e "[Service]\nCPUAccounting=true\nMemoryAccounting=true" > /etc/systemd/system/kubelet.service.d/11-cgroups.conf'
+
+#Disable SE Linux
+    - name: "disable SELinux"
+      selinux:
+        state: disabled
+      register: sestatus
+
+#Add hosts file contents
+    - name: "Create copy the content"
+      template:
+        src: templates/remote_hosts.tmpl
+        dest: /etc/hosts
+        mode: 644
+        owner: root
+        group: root
+        backup: yes
+
+# Add firewall rules
+    - name: "implement rules"
+      firewalld:
+        port: "{{item.port}}/{{item.proto}}"
+        permanent: yes
+        state: enabled
+      loop: "{{ m_ports }}"
+
+#Do a reboot
+    - name: "reboot"
+      reboot:
+      when: sestatus.changed == true
+
+#Wait for the server to boot back
+    - name: "Wait for server to restart"
+      local_action:
+        module: wait_for
+          host={{ inventory_hostname }}
+          port=22
+          delay=10
+          timeout=60
+      when: sestatus.changed == true
+
+# Enable modprob br_netfilter and forward rules
+    - name: "modprob br_netfilter and forward rules"
+      shell:
+        cmd: 'modprobe br_netfilter'
+
+    - shell:
+        cmd: "echo '1' > /proc/sys/net/bridge/bridge-nf-call-iptables"
+    - shell:
+        cmd:  "echo '1' > /proc/sys/net/ipv4/ip_forward"
+
+#Create the sh template
+    - name: "create the check api shell"
+      template:
+        src: templates/check_apiserver.sh_templ
+        dest: /etc/keepalived/check_apiserver.sh
+        mode: '755'
+
+#Create keepalived.conf
+    - name: "Create keepalived.conf"
+      template:
+        src: templates/keepalived.conf.templ
+        dest: /etc/keepalived/keepalived.conf
+        backup: true
+
+# Create ha proxy rule
+    - name: "Create haproxy.conf"
+      template:
+        src: templates/haproxy.cfg_templ
+        dest: /etc/haproxy/haproxy.cfg
+        backup: true
+
+    - name: "Enable vrrp in firewalld"
+      firewalld:
+        rich_rule: 'rule protocol value="vrrp" accept'
+        permanent: yes
+        immediate: yes
+        state: enabled
+
+# Reload Firewall
+    - name: "Firewall reload"
+      systemd:
+        name: firewalld
+        state: reloaded
+
+# Start and enable keep alive and ha proxy
+    - name: "Start and enable keep alive and ha proxy"
+      systemd:
+        name: keepalived
+        state: restarted
+        enabled: yes
+
+    - systemd:
+        name: haproxy
+        state: restarted
+        enabled: yes
+
+#Start and enable docker and kubelet
+    - name: "Start and enable keep alive and ha proxy"
+      systemd:
+        name: docker
+        state: restarted
+        enabled: yes
+
+    - systemd:
+        name: kubelet
+        state: restarted
+        enabled: yes
+
+    - name: "delete Containerd toml"
+      file:
+        path: /etc/containerd/config.toml
+        state: absent
+
+    - name: "restart the containerd"
+      systemd:
+        name: containerd
+        state: restarted
+        enabled: yes
+
+#Joining in to the cluster
+    - name: join in
+      command: "sh master_string.sh"
+
+
+    - name: "Create environment"
+      file:
+        path: ~/.kube
+        owner: root
+        group: root
+        state: directory
+        mode: '0755'
+
+    - copy:
+        src: /etc/kubernetes/admin.conf
+        dest: ~/.kube/config
+        remote_src: yes
+        owner: root
+        group: root
+
+    - name: "ip table rule1"
+      shell:
+        cmd: 'iptables -D  INPUT -j REJECT --reject-with icmp-host-prohibited'
+
+    - name: "ip table rule2"
+      shell:
+        cmd: 'iptables -D  FORWARD -j REJECT --reject-with icmp-host-prohibited'
+

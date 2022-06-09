@@ -1,0 +1,369 @@
+---
+- name: "Install alpha master"
+  hosts: alpha
+  vars_files:
+    - vars/alph-variables
+    - vars/metallb
+    - vars/host_values
+  tasks:
+#Update packages and install needed
+    - name: "Alpha master adding kubernetes repo"
+      copy:
+        src: templates/kubernetes.repo
+        dest: /etc/yum.repos.d/kubernetes.repo
+
+#Get ready with necessary packages
+    - name: "Install yum-utils and chrony"
+      yum:
+        name:
+          - yum-utils
+          - chrony
+        state: latest
+        update_cache: True
+
+#Timedatctl sync
+    - name: Set timezone to Asia/Kolkata
+      timezone:
+        name: Asia/Kolkata
+
+    - name: ntp sync.
+      shell:
+        cmd: 'timedatectl set-ntp true'
+
+    - name: restart chrony
+      systemd:
+        name: chronyd
+        state: restarted
+        enabled: yes
+
+    - name: "Alpha master repos to docker"
+      shell:
+        cmd: 'yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo'
+
+    - name: "Alpha master rp_filter"
+      shell:
+        cmd: 'echo 1 > /proc/sys/net/ipv4/conf/all/rp_filter'
+
+    - name: "Alpha master Update all packages to latest"
+      yum:
+        name: "*"
+        state: present
+        update_cache: true
+
+    - name: " {{ item.name }} install packages"
+      yum:
+        name: "{{ item.name }}"
+        state: latest
+        update_cache: True
+
+      when: item.required == True
+      loop: "{{ packages }}"
+
+#Start and enable docker and kubelet
+    - name: "Alpha master start and enable keep alive and ha proxy"
+      systemd:
+        name: docker
+        state: restarted
+        enabled: yes
+
+    - systemd:
+        name: kubelet
+        state: restarted
+        enabled: yes
+
+    - name: "Alpha master change docker drive to systemd"
+      lineinfile:
+        path: /usr/lib/systemd/system/docker.service
+        regexp: '^(.*)ExecStart=(.*)$'
+        line: 'ExecStart=/usr/bin/dockerd -H fd:// --containerd=/run/containerd/containerd.sock --exec-opt native.cgroupdriver=systemd'
+        backrefs: yes
+
+    - name: "Alpha master create environment for kubelet"
+      file:
+        path: /etc/systemd/system/kubelet.service.d/
+        owner: root
+        group: root
+        state: directory
+        mode: '0755'
+
+    - name: "Alpha master Memory and Accounting"
+      shell:
+        cmd: 'echo -e "[Service]\nCPUAccounting=true\nMemoryAccounting=true" > /etc/systemd/system/kubelet.service.d/11-cgroups.conf'
+
+#Disable SE Linux
+    - name: "Alpha master disable SELinux"
+      selinux:
+        state: disabled
+      register: sestatus
+
+    - name: "Change Hostname"
+      hostname:
+        name: "{{ host_name }}"
+
+#Add hosts file contents
+    - name: "Alpha master copy the content to remote etc_hosts"
+      template:
+        src: templates/remote_hosts.tmpl
+        dest: /etc/hosts
+        mode: 644
+        owner: root
+        group: root
+        backup: yes
+
+#Do a reboot
+    - name: "Alpha master reboot"
+      reboot:
+      when: sestatus.changed == true
+
+#Wait for the server to boot back
+    - name: "Alpha master Wait for server to restart"
+      local_action:
+        module: wait_for
+          host={{ inventory_hostname }}
+          port=22
+          delay=10
+          timeout=60
+      when: sestatus.changed == true
+
+# Add firewall rules
+    - name: "Alpha master implement firewall rules"
+      firewalld:
+        port: "{{item.port}}/{{item.proto}}"
+        permanent: yes
+        state: enabled
+      loop: "{{ m_ports }}"
+
+# Enable modprob br_netfilter and forward rules
+    - name: "Alpha master modprob br_netfilter enable and forward rules"
+      shell:
+        cmd: 'modprobe br_netfilter'
+    - shell:
+        cmd: "echo '1' > /proc/sys/net/bridge/bridge-nf-call-iptables"
+    - shell:
+        cmd: "echo '1' > /proc/sys/net/ipv4/ip_forward"
+
+#Create the sh template
+    - name: "Alpha master create the check_api shell for keepalived"
+      template:
+        src: templates/check_apiserver.sh_templ
+        dest: /etc/keepalived/check_apiserver.sh
+        mode: '755'
+
+#Create keepalived.conf
+    - name: "Alpha master create keepalived.conf"
+      template:
+        src: templates/keepalived.conf.templ
+        dest: /etc/keepalived/keepalived.conf
+        backup: true
+
+# Create ha proxy rule
+    - name: "Alpha master create haproxy.conf"
+      template:
+        src: templates/haproxy.cfg_templ
+        dest: /etc/haproxy/haproxy.cfg
+        backup: true
+
+    - name: "Alpha master enable vrrp in firewalld"
+      firewalld:
+        rich_rule: 'rule protocol value="vrrp" accept'
+        permanent: yes
+        immediate: yes
+        state: enabled
+
+# Reload Firewall
+    - name: "Alpha master firewall reload"
+      systemd:
+        name: firewalld
+        state: reloaded
+
+# Start and enable keep alive and ha proxy
+    - name: "Alpha master start and enable keep alive and ha proxy"
+      systemd:
+        name: keepalived
+        state: restarted
+        enabled: yes
+
+    - systemd:
+        name: haproxy
+        state: restarted
+        enabled: yes
+
+#Start and enable docker and kubelet
+    - name: "Alpha master start and enable docker and kubelet"
+      systemd:
+        name: docker
+        state: restarted
+        enabled: yes
+
+    - systemd:
+        name: kubelet
+        state: restarted
+        enabled: yes
+
+#Auto completion
+    - name: "Alpha master kubernetes autocompletion"
+      lineinfile:
+        path: /root/.bashrc
+        line: 'source <(kubectl completion bash)'
+        insertbefore: EOF
+
+    - name: "Alpha master create kubectl alias for k"
+      lineinfile:
+        path: /root/.bashrc
+        line: 'alias k="kubectl"'
+        insertbefore: EOF
+
+    - name: "Alpha master k autocomplete"
+      lineinfile:
+        path: /root/.bashrc
+        line: 'complete -F __start_kubectl k'
+        insertbefore: EOF
+
+    - name: "Alpha master delete Containerd toml"
+      file:
+        path: /etc/containerd/config.toml
+        state: absent
+
+    - name: "Alpha master restart the containerd"
+      systemd:
+        name: containerd
+        state: restarted
+        enabled: yes
+
+#Initiate the cluster
+    - name: "Alpha master start kubernetes cluster"
+      command: 'kubeadm init --pod-network-cidr=10.244.0.0/16 --service-cidr=10.18.0.0/24 --control-plane-endpoint "k8s-vip:8443" --upload-certs'
+      register: kube_init
+
+    - local_action:
+        module: copy
+        content: "{{ kube_init.stdout_lines }}"
+        dest: output
+
+    - name: "Alpha master create kubernetes master plane"
+      file:
+        path: ~/.kube
+        owner: root
+        group: root
+        state: directory
+        mode: '0755'
+
+    - name: "Alpha master Copy conf to local .kube/config"
+      copy:
+        src: '/etc/kubernetes/admin.conf'
+        dest: '~/.kube/config'
+        remote_src: yes
+        owner: root
+        group: root
+        mode: 644
+
+#Copy to local
+    - name: "Alpha master get conf to local directory for client in kconf/"
+      fetch:
+        src: /etc/kubernetes/admin.conf
+        dest: kconf/
+        flat: true
+
+#Ready with Container network
+#    - name: "Apply network"
+#      shell:
+#        cmd: "export kubever=$(kubectl version | base64 | tr -d '\n'); kubectl apply -f https://cloud.weave.works/k8s/net?k8s-version=$kubever"
+
+#Canal/calico n/w deployment
+    - name: "Apply network Canal"
+      shell:
+        cmd: "curl https://projectcalico.docs.tigera.io/manifests/canal.yaml -O; kubectl apply -f canal.yaml"
+
+
+#Metal LB
+    - name: "Alpha master change strictARP for MetalLB"
+      shell:
+        cmd: 'kubectl get configmap kube-proxy -n kube-system -o yaml | sed -e "s/strictARP: false/strictARP: true/" | kubectl apply -f - -n kube-system'
+
+#Metal LB Namespace
+    - name: "Alpha master Metallb Namespace"
+      command: kubectl apply -f https://raw.githubusercontent.com/metallb/metallb/v0.12.1/manifests/namespace.yaml
+
+#Metal LB Deploy
+    - name: "Alpha master MetallB Deploy"
+      command: kubectl apply -f https://raw.githubusercontent.com/metallb/metallb/v0.12.1/manifests/metallb.yaml
+
+#Member list creation for Metallb
+    - name: "Alpha master member list"
+      command: 'kubectl create secret generic -n metallb-system memberlist --from-literal=secretkey="$(openssl rand -base64 128)"'
+
+#Clean up the tainted pods
+    - name: "Alpha master clean up tainted pods"
+      command: 'kubectl taint nodes --all node-role.kubernetes.io/master-'
+
+#Copy config_Map
+    - name: "Alpha master copy Metallb config_map"
+      template:
+        src: templates/metallb_conf.yaml
+        dest: /root
+        mode: 644
+
+#Apply the config map
+    - name: "Alpha master apply the config map"
+      command: kubectl apply -f metallb_conf.yaml
+
+#Copy PV config
+    - name: "Alpha master copy Metallb config_map"
+      template:
+        src: templates/pv.yaml
+        dest: /root
+        mode: 644
+
+#Apply persistant volume
+    - name: "Alpha master apply the config map"
+      command: kubectl apply -f pv.yaml
+
+
+#Restart keepalive
+    - systemd:
+        name: keepalived
+        state: restarted
+        enabled: yes
+
+    - name: "Alpha master IP table rule1"
+      shell:
+        cmd: 'iptables -D  INPUT -j REJECT --reject-with icmp-host-prohibited'
+
+    - name: "Alpha master IP table rule2"
+      shell:
+        cmd: 'iptables -D  FORWARD -j REJECT --reject-with icmp-host-prohibited'
+
+- name: "Alpha master get connection string"
+  hosts: 127.0.0.1
+  connection: local
+  tasks:
+    - name: "Alpha master get keys"
+      script: py_scripts/get_con_string.py
+      args:
+        executable: /usr/bin/python3
+
+    - name: "Alpha master delete output file"
+      file:
+        path: output
+        state: absent
+
+
+- name: "Alpha master copy fines to destination"
+  hosts: masters
+  become: true
+  tasks:
+    - name: "Alpha master copy master_string to destination"
+      copy:
+        src: master_string
+        dest: ~/master_string.sh
+        mode: 755
+
+- name: "Alpha master copy slave_string to destination"
+  hosts: slaves
+  become: true
+  tasks:
+    - name: copy files to dest
+      copy:
+        src: slave_string
+        dest: ~/slave_string.sh
+        mode: 755

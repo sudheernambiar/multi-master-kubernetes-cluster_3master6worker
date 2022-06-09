@@ -1,0 +1,8 @@
+- name: "Install alpha master"
+  hosts: alpha
+  tasks:
+    - name:
+      fetch:
+        src: /etc/kubernetes/admin.conf
+        dest: kconf/
+        flat: true

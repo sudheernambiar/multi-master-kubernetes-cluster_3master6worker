@@ -1,0 +1,55 @@
+host_name: "k8s-master-1"
+s_type: MASTER
+
+int_face: ens192
+
+p_value: 255
+
+packages:
+  - name: bash-completion
+    required: yes
+  - name: mlocate
+    required: yes
+  - name: wget
+    required: yes
+  - name: net-tools
+    required: yes
+  - name: telnet
+    required: yes
+  - name: ntpdate
+    required: yes
+  - name: docker-ce
+    required: yes
+  - name: kubeadm
+    required: yes
+#Only for master
+  - name: haproxy
+    required: yes
+  - name: keepalived
+    required: yes
+
+
+m_ports:
+  - port: 6443
+    proto: tcp
+  - port: 2379-2380
+    proto: tcp
+  - port: 10250
+    proto: tcp
+  - port: 10251
+    proto: tcp
+  - port: 10252
+    proto: tcp
+  - port: 10255
+    proto: tcp
+  - port: 179
+    proto: tcp
+  - port: 4789
+    proto: udp
+  - port: 8443
+    proto: tcp
+  - port: 7946
+    proto: tcp
+  - port: 7946
+    proto: udp
+
