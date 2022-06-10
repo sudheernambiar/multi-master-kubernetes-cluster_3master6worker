@@ -32,7 +32,7 @@
       timezone:
         name: Asia/Kolkata
 
-    - name: "Sync ntp enabling.
+    - name: "Sync ntp enabling"
       shell:
         cmd: 'timedatectl set-ntp true'
 
