@@ -57,7 +57,7 @@
     - name: "Updating all packages"
       yum:
         name: "*"
-        state: present
+        state: latest
         update_cache: true
 
     - name: " {{ item.name }} installing"
